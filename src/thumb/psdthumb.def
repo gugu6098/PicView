@@ -1,0 +1,4 @@
+LIBRARY PsdThumb
+EXPORTS
+    DllGetClassObject
+    DllCanUnloadNow

@@ -1,0 +1,19 @@
+# build artifacts
+*.exe
+*.dll
+*.lib
+*.pdb
+*.obj
+_build/
+dist/
+build/_build/
+
+# python
+__pycache__/
+*.pyc
+*.spec
+
+# local
+Demo/
+.workbuddy/
+*.log
