@@ -1,10 +1,15 @@
 # PicView
 
+[![Release](https://img.shields.io/github/v/release/gugu6098/PicView)](https://github.com/gugu6098/PicView/releases/latest)
+[![License](https://img.shields.io/github/license/gugu6098/PicView)](LICENSE)
+
+**[⬇ 下载最新版 PicView-Setup.exe](https://github.com/gugu6098/PicView/releases/latest)** · Windows 10 / 11
+
 一个轻量的 Windows 图片查看器。界面跑在系统自带的 Edge（Chromium）内核里，所以打包出来只有一个 **8.6 MB** 的单文件 EXE，不需要 Python、不需要运行库，也没有常驻后台进程。
 
 除了常规格式，它原生支持 **PSD** 和 **PDF**，并且能在资源管理器里给 PSD 文件显示真实内容缩略图（带蓝色 PS 外框和 PSD 角标）。
 
-界面仿 2345 看图王：顶部工具栏 + 底部胶片条 + 状态栏 + 右键菜单 + 幻灯片。
+界面仿 2345 看图王：顶部工具栏 + 底部胶片条 + 状态栏 + 右键菜单 + 幻灯片，支持暗色 / 亮色主题切换。
 
 ## 功能
 
@@ -14,6 +19,7 @@
 - **浏览**：打开任意图片即扫描所在目录（含两层子目录，上限 3000 个文件），左侧目录树、中间缩略图网格、右侧大图预览，`←` `→` 连续翻页
 - **资源管理器缩略图**：C++ 实现的 Shell 缩略图扩展，PSD 在文件夹里直接显示画面内容，统一正方形卡片 + 蓝色外框 + 右下角 PSD 角标
 - **网络共享**：支持 `\\server\share\...` UNC 路径直接打开
+- **主题**：暗色 / 亮色一键切换（工具栏按钮或快捷键 `D`），记忆上次选择
 - **交互**：滚轮缩放、拖拽平移、旋转、适应窗口、1:1、全屏、幻灯片（3 秒/张）、拖入文件夹递归加载
 - **文件关联**：安装后可一键注册为图片默认打开方式
 
