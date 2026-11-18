@@ -25,9 +25,11 @@
 
 ## 使用
 
-1. 下载 Release 里的 `PicView.exe`，双击运行，首次会自动安装到 `%LOCALAPPDATA%\PicView\`
+1. 下载 Release 里的 `PicView-Setup.exe`，双击运行，安装到 `%LOCALAPPDATA%\PicView\app\`
 2. 若弹出 UAC 提权窗口（用于注册 PSD 缩略图扩展），选择「是」
 3. 双击任意图片即可用它打开；未接管默认打开方式时，在「设置 → 默认应用」里搜 PicView 点一次「设为默认值」
+
+> 程序本体是 onedir 布局（exe + `_internal`），启动时不需要自解压，双击图片几乎是瞬时打开。
 
 常用快捷键：
 
@@ -56,21 +58,30 @@ zig c++ -target x86_64-windows-gnu -shared -O2 \
     -o PsdThumb.dll psdthumb.cpp psdthumb.def -lole32 -lgdi32
 ```
 
-### 2. 打包 EXE
+### 2. 打包
 
 ```bash
-pip install pyinstaller pillow
+pip install pyinstaller
 cd src
-pyinstaller --onefile --noconsole --icon assets/picview.ico \
+# 2a. onedir 主程序（快，装好后双击图片近乎瞬时）
+pyinstaller --onedir --noconsole --name PicView --icon assets/picview.ico \
     --add-data "<绝对路径>/src/PicView.html;." \
     --add-data "<绝对路径>/src/assets/picview.ico;." \
     --add-data "<绝对路径>/src/thumb/PsdThumb.dll;." \
     picview_launcher.py
+
+# 2b. 把产物打成 payload.zip
+python build/make_payload.py dist/PicView build/payload.zip
+
+# 2c. 单文件安装器（分发给别人只需要这一个 exe）
+pyinstaller --onefile --noconsole --name PicView-Setup --icon assets/picview.ico \
+    --add-data "<绝对路径>/build/payload.zip;." \
+    picview_setup.py
 ```
 
-产物 `picview_launcher.exe` 改名为 `PicView.exe` 即可。
+产物：`dist/PicView-Setup.exe`（单文件，给别人用）、`dist/PicView/`（onedir 布局）。
 
-或者直接跑 `build/build.bat`，按提示改一下路径。
+或者直接跑 `build/build.bat`，四步一次完成。
 
 ## 目录结构
 

@@ -7,6 +7,7 @@ import shutil
 import ctypes
 import hashlib
 import subprocess
+import time
 import winreg
 from urllib.parse import quote
 
@@ -38,7 +39,7 @@ def is_admin():
 
 
 def thumb_dll_path():
-    return os.path.join(appdir(), 'PsdThumb.dll')
+    return os.path.join(appdir_bin(), 'PsdThumb.dll')
 
 
 def thumb_installed():
@@ -116,6 +117,21 @@ def appdir():
     return os.path.join(base, APP)
 
 
+def appdir_bin():
+    """程序本体目录（onedir 安装后 exe 与 _internal 都在这里）"""
+    return os.path.join(appdir(), 'app')
+
+
+def bundle_root():
+    """onedir 打包：exe 所在目录（含 _internal）；onefile：解压出的临时目录。"""
+    if getattr(sys, 'frozen', False):
+        exed = os.path.dirname(os.path.abspath(sys.executable))
+        if os.path.isdir(os.path.join(exed, '_internal')):
+            return exed
+        return getattr(sys, '_MEIPASS', exed)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
 def res(name):
     root = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(root, name)
@@ -185,22 +201,46 @@ def notify_shell():
         pass
 
 
+def copy_bundle(root, ad):
+    """把整份程序复制到安装目录（跳过运行期数据）。"""
+    skip = {'EdgeProfile', 'cache', 'launch.js', 'assoc_backup.json'}
+    os.makedirs(ad, exist_ok=True)
+    for name in os.listdir(root):
+        if name in skip:
+            continue
+        s = os.path.join(root, name)
+        t = os.path.join(ad, name)
+        try:
+            if os.path.isdir(s):
+                shutil.rmtree(t, ignore_errors=True)
+                shutil.copytree(s, t)
+            else:
+                shutil.copy2(s, t)
+        except Exception:
+            pass
+
+
 def install():
     d = appdir()
+    ad = appdir_bin()
     os.makedirs(d, exist_ok=True)
+    os.makedirs(ad, exist_ok=True)
 
-    # copy self + html to a stable install location
-    target_exe = os.path.join(d, APP + '.exe')
-    if os.path.abspath(sys.executable).lower() != target_exe.lower():
+    # onedir 安装：直接从磁盘加载 exe 与 _internal，省掉 onefile
+    # 每次启动都要解压 8.6MB 的固定开销。
+    root = bundle_root()
+    here = (os.path.dirname(os.path.abspath(sys.executable))
+            if getattr(sys, 'frozen', False) else '')
+    if os.path.abspath(here).lower() != os.path.abspath(ad).lower():
+        copy_bundle(root, ad)
+    target_exe = os.path.join(ad, APP + '.exe')
+    if not os.path.isfile(target_exe):
+        target_exe = os.path.abspath(sys.executable)
+    for n in ('PicView.html', 'picview.ico'):
         try:
-            shutil.copy2(sys.executable, target_exe)
+            shutil.copy2(res(n), os.path.join(ad, n))
         except Exception:
-            target_exe = os.path.abspath(sys.executable)
-    shutil.copy2(res('PicView.html'), os.path.join(d, 'PicView.html'))
-    try:
-        shutil.copy2(res('picview.ico'), os.path.join(d, 'picview.ico'))
-    except Exception:
-        pass
+            pass
 
     cmd = '"%s" "%%1"' % target_exe
     set_default('Software\\Classes\\' + PROGID, 'PicView 图片查看器')
@@ -297,7 +337,7 @@ def install():
 
     # deploy + register the PSD thumbnail handler (Windows 11 needs HKLM, so admin)
     try:
-        shutil.copy2(res('PsdThumb.dll'), os.path.join(d, 'PsdThumb.dll'))
+        shutil.copy2(res('PsdThumb.dll'), os.path.join(ad, 'PsdThumb.dll'))
     except Exception:
         pass
     if os.path.isfile(thumb_dll_path()) and not thumb_installed():
@@ -309,7 +349,7 @@ def install():
         else:
             try:
                 ctypes.windll.shell32.ShellExecuteW(
-                    None, 'runas', os.path.join(d, APP + '.exe'), '--regthumb', None, 0)
+                    None, 'runas', os.path.join(ad, APP + '.exe'), '--regthumb', None, 0)
             except Exception:
                 pass
     return d
@@ -369,11 +409,27 @@ def uninstall():
         unregister_thumb()
     except Exception:
         pass
-    for n in ('PicView.html', 'picview.ico', 'PsdThumb.dll', 'launch.js', 'assoc_backup.json'):
+    for n in ('PicView.html', 'picview.ico', 'PsdThumb.dll', 'launch.js',
+              'assoc_backup.json', APP + '.exe'):
         try:
             os.remove(os.path.join(d, n))
         except Exception:
             pass
+    for n in ('cache', 'EdgeProfile'):
+        shutil.rmtree(os.path.join(d, n), ignore_errors=True)
+    ad = appdir_bin()
+    running_here = (getattr(sys, 'frozen', False) and
+                    os.path.normcase(os.path.dirname(os.path.abspath(sys.executable)))
+                    == os.path.normcase(os.path.abspath(ad)))
+    if running_here:
+        # 正在运行的程序删不掉自己，交给系统在进程退出后清理
+        try:
+            subprocess.Popen('cmd /c ping -n 3 127.0.0.1 >nul & rmdir /s /q "%s"' % ad,
+                             shell=True, creationflags=0x08000000)
+        except Exception:
+            pass
+    else:
+        shutil.rmtree(ad, ignore_errors=True)
     notify_shell()
 
 
@@ -414,34 +470,108 @@ CACHE_MAX_TOTAL = 600 * 1024 * 1024
 
 def localize_remote(files, d):
     """浏览器读不到网络共享(UNC)上的文件字节；
-    PSD/PDF 需要读字节才能解码，因此先复制到本地缓存再把 url 指过去。"""
+    PSD/PDF 需要读字节才能解码，因此先复制到本地缓存再把 url 指过去。
+    增量策略：大小一致且缓存不比源文件旧就直接复用，只补新增/变更的文件。"""
     cache = os.path.join(d, 'cache')
     need = [f for f in files
             if f['k'] in ('psd', 'pdf') and str(f.get('path', '')).startswith('\\\\')]
     if not need:
         return
-    shutil.rmtree(cache, ignore_errors=True)
+    os.makedirs(cache, exist_ok=True)
     total = 0
+    keep = set()
     for f in need:
-        if f['size'] > CACHE_MAX_FILE or total + f['size'] > CACHE_MAX_TOTAL:
+        if f['size'] > CACHE_MAX_FILE:
+            continue
+        name = (hashlib.md5(f['path'].encode('utf-8')).hexdigest()[:10]
+                + '_' + f['name'])
+        dst = os.path.join(cache, name)
+        # 命中检查：文件存在且大小/时间对得上，跳过整份重拷
+        try:
+            st = os.stat(dst)
+            src = os.stat(f['path'])
+            if st.st_size == f['size'] and st.st_mtime >= src.st_mtime - 2:
+                f['url'] = fileurl(dst)
+                keep.add(name)
+                total += f['size']
+                continue
+        except Exception:
+            pass
+        if total + f['size'] > CACHE_MAX_TOTAL:
             continue
         try:
-            os.makedirs(cache, exist_ok=True)
-            dst = os.path.join(cache,
-                               hashlib.md5(f['path'].encode('utf-8')).hexdigest()[:10]
-                               + '_' + f['name'])
             shutil.copy2(f['path'], dst)
             f['url'] = fileurl(dst)
+            keep.add(name)
             total += f['size']
         except Exception:
             pass
+    # 清掉本次清单之外的陈旧缓存
+    try:
+        for n in os.listdir(cache):
+            if n not in keep:
+                try:
+                    os.remove(os.path.join(cache, n))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+def work_area():
+    """屏幕可用区域（扣掉任务栏）。"""
+    try:
+        class RECT(ctypes.Structure):
+            _fields_ = [('left', ctypes.c_long), ('top', ctypes.c_long),
+                        ('right', ctypes.c_long), ('bottom', ctypes.c_long)]
+        r = RECT()
+        if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(r), 0):
+            w, h = r.right - r.left, r.bottom - r.top
+            if w > 320 and h > 240:
+                return w, h
+    except Exception:
+        pass
+    return 1440, 900
+
+
+def edge_windows():
+    u = ctypes.windll.user32
+    out = []
+    proto = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    def cb(hwnd, _lparam):
+        buf = ctypes.create_unicode_buffer(64)
+        u.GetClassNameW(hwnd, buf, 64)
+        if buf.value == 'Chrome_WidgetWin_1' and u.IsWindowVisible(hwnd):
+            out.append(hwnd)
+        return True
+
+    u.EnumWindows(proto(cb), 0)
+    return out
+
+
+def maximize_new(pre, timeout=6.0):
+    """把这次新开出来的窗口最大化。
+    --app 窗口不记录最大化状态，Edge 每次都会按 --window-size 重新开一个普通窗口。"""
+    u = ctypes.windll.user32
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        for h in edge_windows():
+            if h not in pre:
+                u.ShowWindow(h, 3)     # SW_MAXIMIZE
+                u.SetForegroundWindow(h)
+                return True
+        time.sleep(0.08)
+    return False
 
 
 def open_view(target):
     d = appdir()
-    html = os.path.join(d, 'PicView.html')
+    ad = appdir_bin()
+    html = os.path.join(ad, 'PicView.html')
     if not os.path.isfile(html):
         install()
+        html = os.path.join(appdir_bin(), 'PicView.html')
     data = None
     if target and os.path.isfile(target):
         target = os.path.abspath(target)
@@ -457,7 +587,7 @@ def open_view(target):
         data = {'root': folder, 'active': active,
                 'files': [{k: v for k, v in f.items() if k != 'path'} for f in files]}
     try:
-        with open(os.path.join(d, 'launch.js'), 'w', encoding='utf-8') as f:
+        with open(os.path.join(ad, 'launch.js'), 'w', encoding='utf-8') as f:
             f.write('window.PICVIEW_LAUNCH=' + json.dumps(data, ensure_ascii=False) + ';')
     except Exception:
         pass
@@ -465,18 +595,22 @@ def open_view(target):
     edge = find_edge()
     url = fileurl(html)
     if edge:
+        w, h = work_area()
         args = [edge,
                 '--app=' + url,
                 '--allow-file-access-from-files',
                 '--user-data-dir=' + os.path.join(d, 'EdgeProfile'),
-                '--window-size=1440,900',
+                '--window-size=%d,%d' % (w, h),
+                '--window-position=0,0',
                 '--no-first-run',
                 '--no-default-browser-check',
                 '--disable-extensions',
                 '--disable-background-networking',
                 '--disable-sync']
         try:
+            pre = set(edge_windows())
             subprocess.Popen(args, close_fds=True)
+            maximize_new(pre)
         except Exception:
             os.startfile(html)
     else:
@@ -484,9 +618,9 @@ def open_view(target):
 
 
 def is_installed():
-    d = appdir()
-    return (os.path.isfile(os.path.join(d, 'PicView.html')) and
-            os.path.isfile(os.path.join(d, APP + '.exe')))
+    ad = appdir_bin()
+    return (os.path.isfile(os.path.join(ad, 'PicView.html')) and
+            os.path.isfile(os.path.join(ad, APP + '.exe')))
 
 
 def main():
@@ -506,6 +640,12 @@ def main():
             register_thumb()
         except Exception:
             pass
+        return
+    if '--install-only' in a:
+        try:
+            install()
+        except Exception as e:
+            msg('安装失败：%s' % e)
         return
     target = next((x for x in a if not x.startswith('--') and os.path.isfile(x)), None)
     if '--install' in a or not is_installed():
