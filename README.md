@@ -5,6 +5,19 @@
 
 **[⬇ 下载最新版 PicView-Setup.exe](https://github.com/gugu6098/PicView/releases/latest)** · Windows 10 / 11
 
+<table>
+<tr><td width="90"><b>English</b></td><td>
+
+A lightweight Windows image viewer. One <b>16 MB</b> installer, no Python or runtime needed, no background process. Native <b>PSD / PDF</b> rendering, real PSD thumbnails in Explorer, print &amp; set-as-wallpaper, dark / light theme. Window appears in <b>~300 ms</b> at about <b>80 MB</b> RAM.
+
+</td></tr>
+<tr><td><b>简体中文</b></td><td>
+
+一个轻量的 Windows 图片查看器。分发只要一个 <b>16MB</b> 安装包，不用装 Python 和运行库，没有常驻后台进程。原生渲染 <b>PSD / PDF</b>，资源管理器里直显 PSD 内容缩略图，支持打印与设为桌面背景，明暗主题切换。<b>约 300ms</b> 出窗口，内存占用约 <b>80MB</b>。
+
+</td></tr>
+</table>
+
 一个轻量的 Windows 图片查看器。界面跑在系统自带的 Edge（Chromium）内核里，分发时只需要一个 **约 16 MB** 的单文件安装器，不需要用户装 Python、不需要运行库，也没有常驻后台进程。
 
 除了常规格式，它原生支持 **PSD** 和 **PDF**，并且能在资源管理器里给 PSD 文件显示真实内容缩略图（带蓝色 PS 外框和 PSD 角标）。
