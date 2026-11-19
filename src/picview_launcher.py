@@ -684,14 +684,35 @@ def open_view(target):
                 break
         data = {'root': folder, 'active': active,
                 'files': [{k: v for k, v in f.items() if k != 'path'} for f in files]}
+    # 启动页：把本次的数据直接内联进模板，用唯一文件名落盘。
+    # Edge 对 file:// 的缓存会忽略查询串，固定文件名会读到上一次的数据，
+    # 表现为「打开图片却显示空界面」，所以每次换文件名。
+    data_js = 'window.PICVIEW_LAUNCH=' + json.dumps(data, ensure_ascii=False) + ';'
+    page = html
     try:
-        with open(os.path.join(ad, 'launch.js'), 'w', encoding='utf-8') as f:
-            f.write('window.PICVIEW_LAUNCH=' + json.dumps(data, ensure_ascii=False) + ';')
+        with open(html, encoding='utf-8') as f:
+            tpl = f.read()
+        if '/*LAUNCH_DATA*/' in tpl:
+            run = 'run-%d.html' % os.getpid()
+            run_path = os.path.join(ad, run)
+            with open(run_path, 'w', encoding='utf-8') as f:
+                f.write(tpl.replace('/*LAUNCH_DATA*/', data_js))
+            page = run_path
+            for fn in os.listdir(ad):
+                if fn.startswith('run-') and fn.endswith('.html') and fn != run:
+                    try:
+                        os.remove(os.path.join(ad, fn))
+                    except Exception:
+                        pass
+        else:
+            # 老界面兜底：仍然写 launch.js
+            with open(os.path.join(ad, 'launch.js'), 'w', encoding='utf-8') as f:
+                f.write(data_js)
     except Exception:
         pass
 
     edge = find_edge()
-    url = fileurl(html)
+    url = fileurl(page)
     if edge:
         w, h = work_area()
         args = [edge,

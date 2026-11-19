@@ -176,7 +176,7 @@ body.fs #stage{background:#17191c}
 }
 </style>
 <script>try{if(localStorage.getItem('picview.theme')==='dark')document.documentElement.classList.add('dark');}catch(e){}</script>
-<script src="launch.js"></script>
+<script>/*LAUNCH_DATA*/</script>
 </head>
 <body>
 
@@ -604,6 +604,22 @@ function updNav(){
 const BIG_EDGE=4096;                          /* 显示长边上限：超出即降采样 */
 const BIG_BYTES=3*1048576;                    /* 超过 3MB 的本地图才走降采样 */
 const ANIM_EXT=new Set(['gif','apng','svg','ico']);
+/* 修复 BMP 头：有的导出工具把 bfOffBits 写成 14、bfSize 写成头长度，
+   严格解码器（Edge）会直接拒绝，按 biSize 重算像素起始位置。 */
+async function repairBmp(f){
+  if(ext(f.name)!=='bmp')return null;
+  let buf;
+  try{buf=new Uint8Array(await xhrBuffer(f.url));}catch(e){return null;}
+  if(buf.length<54||buf[0]!==0x42||buf[1]!==0x4d)return null;
+  const dv=new DataView(buf.buffer);
+  const biSize=dv.getUint32(14,true), need=14+biSize;
+  const off=dv.getUint32(10,true), bfSize=dv.getUint32(2,true);
+  let changed=false;
+  if(need>=54&&need<buf.length&&off!==need&&(off<need||off>=buf.length)){dv.setUint32(10,need,true);changed=true;}
+  if(bfSize<54||bfSize>buf.length){dv.setUint32(2,buf.length,true);changed=true;}
+  if(!changed)return null;
+  return new Blob([buf],{type:'image/bmp'});
+}
 async function showImg(f){
   if(objUrl){URL.revokeObjectURL(objUrl);objUrl=null;}
   const done=(el,w,h)=>{
@@ -614,7 +630,19 @@ async function showImg(f){
   };
   const fail=()=>{$('stDim').textContent='—';tip('该图片无法显示：'+f.name);};
   const byUrl=u=>{const im=new Image();im.onload=()=>done(im,im.naturalWidth,im.naturalHeight);
-                  im.onerror=fail;im.src=u;};
+                  im.onerror=async()=>{
+                    /* 有些导出工具把 BMP 头写坏（bfOffBits 填 14、bfSize 填头部长度），
+                       严格解码器直接拒绝。这里按 biSize 重算像素偏移再试一次。 */
+                    const fixed=await repairBmp(f);
+                    if(!fixed){fail();return;}
+                    if(objUrl){URL.revokeObjectURL(objUrl);}
+                    objUrl=URL.createObjectURL(fixed);
+                    const im2=new Image();
+                    im2.onload=()=>done(im2,im2.naturalWidth,im2.naturalHeight);
+                    im2.onerror=fail;
+                    im2.src=objUrl;
+                  };
+                  im.src=u;};
   /* 本地大图：6000×4000 解码后占 96MB 位图，加载后缩到 4096 长边画布再丢掉原图 */
   const localFile=!!f.file||((f.url||'').indexOf('file:///')===0&&f.url.charAt(8)!=='/');
   if(localFile&&!ANIM_EXT.has(ext(f.name))&&!f.file&&(f.size||0)>BIG_BYTES){
