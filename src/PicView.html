@@ -382,12 +382,16 @@ function renderFilm(){
   clearTimeout(filmTimer);
   filmIO=new IntersectionObserver(es=>{
     es.forEach(e=>{
-      if(!e.isIntersecting)return;
-      const el=e.target;
-      if(!el.dataset.done){el.dataset.done='1';const h=el.querySelector('.ft');if(h&&el._f)makeThumb(el._f,h,60,60);}
-      filmIO.unobserve(el);
+      const el=e.target,h=el.querySelector('.ft');
+      if(e.isIntersecting){
+        if(!el.dataset.done){el.dataset.done='1';if(h&&el._f)makeThumb(el._f,h,60,60);}
+      }else if(el.dataset.done){
+        /* 滑出缓冲区即释放缩略图位图，长列表内存不随滚动增长 */
+        el.dataset.done='';
+        if(h)h.innerHTML='<div class="ph">▧</div>';
+      }
     });
-  },{root:film,rootMargin:'0px 320px'});
+  },{root:film,rootMargin:'0px 240px'});
   film._next=filmAppend(0,FILM_FIRST);
   filmChunk();
 }
@@ -580,22 +584,48 @@ function updNav(){
   const dis=isPdf();
   ['btnRL','btnRR','btnFit','btnIn','btnOut','btnActual'].forEach(id=>{$(id).disabled=dis;});
 }
+const BIG_EDGE=4096;                          /* 显示长边上限：超出即降采样 */
+const BIG_BYTES=3*1048576;                    /* 超过 3MB 的本地图才走降采样 */
+const ANIM_EXT=new Set(['gif','apng','svg','ico']);
 async function showImg(f){
   if(objUrl){URL.revokeObjectURL(objUrl);objUrl=null;}
-  const im=new Image();
-  im.onload=()=>{
-    baseW=im.naturalWidth;baseH=im.naturalHeight;
-    $('stDim').textContent=baseW+' × '+baseH+' · '+f.k.toUpperCase();
-    inner.innerHTML='';inner.appendChild(im);empty.style.display='none';
+  const done=(el,w,h)=>{
+    baseW=w;baseH=h;
+    $('stDim').textContent=w+' × '+h+' · '+f.k.toUpperCase();
+    inner.innerHTML='';inner.appendChild(el);empty.style.display='none';
     isFit=true;fit();
   };
-  im.onerror=()=>{$('stDim').textContent='—';tip('该图片无法显示：'+f.name);};
+  const fail=()=>{$('stDim').textContent='—';tip('该图片无法显示：'+f.name);};
+  const byUrl=u=>{const im=new Image();im.onload=()=>done(im,im.naturalWidth,im.naturalHeight);
+                  im.onerror=fail;im.src=u;};
+  /* 本地大图：6000×4000 解码后占 96MB 位图，加载后缩到 4096 长边画布再丢掉原图 */
+  const localFile=!!f.file||((f.url||'').indexOf('file:///')===0&&f.url.charAt(8)!=='/');
+  if(localFile&&!ANIM_EXT.has(ext(f.name))&&!f.file&&(f.size||0)>BIG_BYTES){
+    const im=new Image();
+    im.onload=()=>{
+      const mw=im.naturalWidth,mh=im.naturalHeight;
+      if(Math.max(mw,mh)>BIG_EDGE){
+        const s=BIG_EDGE/Math.max(mw,mh);
+        const cv=document.createElement('canvas');
+        cv.width=Math.max(1,Math.round(mw*s));cv.height=Math.max(1,Math.round(mh*s));
+        cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);
+        im.src='';                       /* 释放整张解码位图 */
+        done(cv,mw,mh);
+      }else{
+        done(im,mw,mh);
+      }
+    };
+    im.onerror=fail;
+    im.src=f.url;
+    return;
+  }
   try{
-    if(!f.file&&f.url){im.src=f.url;}          // 网络共享：直接按 URL 取图
-    else{objUrl=URL.createObjectURL(await getBlob(f));im.src=objUrl;}
+    if(!f.file&&f.url){byUrl(f.url);return;}   // 网络共享：直接按 URL 取图，不读字节
+    objUrl=URL.createObjectURL(await getBlob(f));
+    byUrl(objUrl);
   }catch(e){
     // 网络共享等场景读不到字节时，直接让浏览器按 URL 取图
-    if(f.url)im.src=f.url;
+    if(f.url)byUrl(f.url);
     else{$('stDim').textContent='—';tip('读取失败：'+(e.message||e));}
   }
 }

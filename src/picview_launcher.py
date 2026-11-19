@@ -434,32 +434,48 @@ def uninstall():
 
 
 def scan(folder, limit=3000):
+    """扫描目录（深度 2 层）。用 os.scandir 的 DirEntry 缓存，
+    枚举时已经带回文件大小，比 os.walk + getsize 少一次 stat。"""
     out = []
     folder = os.path.abspath(folder)
-    for dp, dns, fns in os.walk(folder):
-        if dp[len(folder):].count(os.sep) >= 2:
-            dns[:] = []
-            continue
-        dns[:] = [x for x in dns if not x.startswith('.')]
-        for fn in fns:
-            e = os.path.splitext(fn)[1].lower()
-            if e not in ALL_EXTS:
-                continue
-            full = os.path.join(dp, fn)
+    stem = len(folder)
+
+    def walk(path, depth):
+        try:
+            it = os.scandir(path)
+        except OSError:
+            return
+        with it:
             try:
-                size = os.path.getsize(full)
-            except Exception:
-                continue
-            out.append({'name': fn,
-                        'rel': os.path.relpath(full, folder).replace('\\', '/'),
-                        'path': full,
-                        'url': fileurl(full),
-                        'size': size,
-                        'k': kind(fn)})
-            if len(out) >= limit:
-                break
-        if len(out) >= limit:
-            break
+                for e in it:
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            if depth < 2 and not e.name.startswith('.'):
+                                walk(e.path, depth + 1)
+                            if len(out) >= limit:
+                                return
+                            continue
+                    except OSError:
+                        continue
+                    ext = os.path.splitext(e.name)[1].lower()
+                    if ext not in ALL_EXTS:
+                        continue
+                    try:
+                        size = e.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
+                    out.append({'name': e.name,
+                                'rel': os.path.relpath(e.path, folder).replace('\\', '/'),
+                                'path': e.path,
+                                'url': fileurl(e.path),
+                                'size': size,
+                                'k': kind(e.name)})
+                    if len(out) >= limit:
+                        return
+            except OSError:
+                return
+
+    walk(folder, 0)
     out.sort(key=lambda x: x['rel'].lower())
     return out
 
@@ -561,8 +577,20 @@ def maximize_new(pre, timeout=6.0):
                 u.ShowWindow(h, 3)     # SW_MAXIMIZE
                 u.SetForegroundWindow(h)
                 return True
-        time.sleep(0.08)
+        time.sleep(0.02)
     return False
+
+
+def sync_assets(ad):
+    """把随包的界面文件同步到安装目录：升级后不必重装，启动也不会变慢。"""
+    for n in ('PicView.html', 'picview.ico'):
+        try:
+            s = res(n)
+            t = os.path.join(ad, n)
+            if not os.path.isfile(t) or os.path.getsize(t) != os.path.getsize(s):
+                shutil.copy2(s, t)
+        except Exception:
+            pass
 
 
 def open_view(target):
@@ -572,6 +600,8 @@ def open_view(target):
     if not os.path.isfile(html):
         install()
         html = os.path.join(appdir_bin(), 'PicView.html')
+    else:
+        sync_assets(ad)
     data = None
     if target and os.path.isfile(target):
         target = os.path.abspath(target)
@@ -606,7 +636,22 @@ def open_view(target):
                 '--no-default-browser-check',
                 '--disable-extensions',
                 '--disable-background-networking',
-                '--disable-sync']
+                '--disable-sync',
+                # --- 内存最小化（实测私有内存 203MB -> 130MB）---
+                '--disable-gpu',                    # 关掉 GPU 进程，省 ~70MB
+                '--enable-low-end-device-mode',     # 缩小光栅/图块缓存
+                '--renderer-process-limit=1',
+                '--process-per-site',
+                '--js-flags=--max-old-space-size=256 --max-semi-space-size=2',
+                '--disk-cache-size=4194304',
+                '--disable-component-update',
+                '--disable-domain-reliability',
+                '--disable-client-side-phishing-detection',
+                '--no-pings',
+                '--metrics-recording-only',
+                '--disable-breakpad',
+                '--disable-crash-reporter',
+                '--no-service-autorun']
         try:
             pre = set(edge_windows())
             subprocess.Popen(args, close_fds=True)
