@@ -3,16 +3,18 @@
 import os
 import sys
 import json
+import base64
 import shutil
 import ctypes
 import hashlib
 import subprocess
 import time
 import winreg
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 APP = 'PicView'
 PROGID = 'PicView.Image'
+PROTO = 'picview'
 HKCU = winreg.HKEY_CURRENT_USER
 
 IMG_EXTS = {'.jpg', '.jpeg', '.jpe', '.jfif', '.png', '.gif', '.bmp',
@@ -201,6 +203,65 @@ def notify_shell():
         pass
 
 
+def register_proto(exe):
+    """注册 picview: 协议，界面里“设为桌面背景”靠它回调本程序。"""
+    base = 'Software\\Classes\\' + PROTO
+    set_default(base, 'URL:PicView')
+    set_value(base, 'URL Protocol', '')
+    set_default(base + r'\DefaultIcon', exe + ',0')
+    set_default(base + r'\shell\open\command', '"%s" --wall "%%1"' % exe)
+
+
+def unregister_proto():
+    for p in (r'\shell\open\command', r'\shell\open', r'\shell', ''):
+        delete_key('Software\\Classes\\' + PROTO + p)
+
+
+def _b64url(s):
+    s = s.replace('-', '+').replace('_', '/')
+    s += '=' * (-len(s) % 4)
+    return base64.b64decode(s).decode('utf-8', 'replace')
+
+
+def set_wallpaper(uri):
+    """picview:wall-<base64(file url)> -> 设为桌面背景"""
+    s = str(uri or '').strip().strip('"')
+    if 'wall-' in s:
+        s = s.split('wall-', 1)[1]
+    s = s.rstrip('/').strip()
+    try:
+        url = _b64url(s)
+    except Exception:
+        return False
+    if not url.startswith('file:///'):
+        return False
+    path = unquote(url[8:]).replace('/', '\\')
+    if not os.path.isfile(path):
+        return False
+    try:
+        k = winreg.CreateKey(HKCU, 'Control Panel\\Desktop')
+        try:
+            winreg.SetValueEx(k, 'WallpaperStyle', 0, winreg.REG_SZ, '10')  # 填充
+            winreg.SetValueEx(k, 'TileWallpaper', 0, winreg.REG_SZ, '0')
+        finally:
+            winreg.CloseKey(k)
+    except Exception:
+        pass
+    try:
+        return bool(ctypes.windll.user32.SystemParametersInfoW(0x0014, 0, path, 3))
+    except Exception:
+        return False
+
+
+def get_wallpaper():
+    buf = ctypes.create_unicode_buffer(520)
+    try:
+        ctypes.windll.user32.SystemParametersInfoW(0x0073, 520, buf, 0)
+    except Exception:
+        return ''
+    return buf.value
+
+
 def copy_bundle(root, ad):
     """把整份程序复制到安装目录（跳过运行期数据）。"""
     skip = {'EdgeProfile', 'cache', 'launch.js', 'assoc_backup.json'}
@@ -250,6 +311,9 @@ def install():
     set_default(r'Software\Classes\Applications\PicView.exe\shell\open\command', cmd)
     set_default(r'Software\Classes\Applications\PicView.exe\DefaultIcon', target_exe + ',0')
     set_value(r'Software\Classes\Applications\PicView.exe', 'FriendlyAppName', APP)
+
+    # picview: 协议（界面里的“设为桌面背景”）
+    register_proto(target_exe)
 
     # Register as a real "Default apps" entry; Windows needs one user click to
     # confirm a default app (it silently reverts programmatic UserChoice writes).
@@ -407,6 +471,10 @@ def uninstall():
         delete_key(p)
     try:
         unregister_thumb()
+    except Exception:
+        pass
+    try:
+        unregister_proto()
     except Exception:
         pass
     for n in ('PicView.html', 'picview.ico', 'PsdThumb.dll', 'launch.js',
@@ -670,6 +738,21 @@ def is_installed():
 
 def main():
     a = sys.argv[1:]
+    if '--wall' in a:
+        i = a.index('--wall')
+        uri = a[i + 1] if len(a) > i + 1 else ''
+        try:
+            set_wallpaper(uri)
+        except Exception:
+            pass
+        return
+    if '--getwall' in a:
+        try:
+            with open(os.path.join(appdir(), 'wall.txt'), 'w', encoding='utf-8') as f:
+                f.write(get_wallpaper())
+        except Exception:
+            pass
+        return
     if '--uninstall' in a:
         uninstall()
         msg('PicView 已卸载，文件关联已还原。')

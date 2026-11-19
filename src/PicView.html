@@ -160,6 +160,20 @@ body.nofilm #filmWrap{display:none}
 /* ---------- 全屏 ---------- */
 body.fs #toolbar,body.fs #filmWrap,body.fs #status,body.fs #tree{display:none}
 body.fs #stage{background:#17191c}
+
+/* ---------- 打印：只留当前图片 ---------- */
+@media print{
+  html,body{background:#fff!important;height:auto!important;overflow:visible!important}
+  #toolbar,#tree,#filmWrap,#status,#ctx,#tip,#dropMask,.navArrow{display:none!important}
+  #body{display:block!important;height:auto!important;min-height:0!important;overflow:visible!important}
+  #stage{display:flex!important;position:static!important;width:auto!important;height:auto!important;
+    min-height:92vh!important;align-items:center!important;justify-content:center!important;
+    padding:0!important;background:#fff!important;overflow:visible!important}
+  #stageInner{transform:none!important;position:static!important;margin:auto;
+    max-width:100%;max-height:100vh}
+  #stageInner img,#stageInner canvas{max-width:100%!important;max-height:96vh!important;object-fit:contain}
+  #empty{display:none!important}
+}
 </style>
 <script>try{if(localStorage.getItem('picview.theme')==='dark')document.documentElement.classList.add('dark');}catch(e){}</script>
 <script src="launch.js"></script>
@@ -255,6 +269,9 @@ body.fs #stage{background:#17191c}
   <div class="csep"></div>
   <div class="ci" data-a="copyimg"><span>复制图片</span><em>Ctrl+C</em></div>
   <div class="ci" data-a="copy"><span>复制文件名</span></div>
+  <div class="csep"></div>
+  <div class="ci" data-a="print"><span>打印</span><em>Ctrl+P</em></div>
+  <div class="ci" data-a="wall"><span>设为桌面背景</span></div>
 </div>
 
 <input type="file" id="picker" webkitdirectory directory multiple style="display:none">
@@ -739,6 +756,8 @@ $('ctx').addEventListener('click',e=>{
   else if(a==='full')toggleFull();
   else if(a==='copy')copyName();
   else if(a==='copyimg')copyImage();
+  else if(a==='print')doPrint();
+  else if(a==='wall')setWall();
 });
 document.addEventListener('mousedown',e=>{if(!e.target.closest('#ctx'))closeCtx();},true);
 window.addEventListener('blur',closeCtx);
@@ -775,6 +794,29 @@ async function copyImage(){
     const m=String(e&&e.message||e);
     tip(/secure|permission|denied|NotAllowed/i.test(m)?'复制失败：系统拒绝了剪贴板写入':'复制失败：'+m);
   }
+}
+
+/* ---------- 打印 / 设为桌面背景 ---------- */
+function doPrint(){
+  const f=curFile();if(!f)return;
+  if(isPdf()){
+    const fr=inner.querySelector('iframe');
+    try{fr.contentWindow.focus();fr.contentWindow.print();return;}catch(e){}
+    tip('PDF 请在内置阅读器里点打印');return;
+  }
+  if(!inner.firstElementChild){tip('没有可打印的图片');return;}
+  window.print();
+}
+function setWall(){
+  const f=curFile();if(!f)return;
+  if(f.k!=='img'){tip('只有图片可以设为桌面背景');return;}
+  const u=f.url||'';
+  if(u.indexOf('file:///')!==0||u.charAt(8)==='/'){tip('网络共享上的图片暂不支持设为背景');return;}
+  try{
+    /* 交给 PicView.exe 处理（picview: 协议），浏览器本身没有设置壁纸的能力 */
+    location.href='picview:wall-'+btoa(u).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    tip('已设为桌面背景');
+  }catch(e){tip('设置失败：'+(e.message||e));}
 }
 
 /* ---------- 主题（暗色 / 亮色） ---------- */
@@ -836,6 +878,7 @@ document.addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   if(e.ctrlKey&&k==='o'){e.preventDefault();$('btnPick').click();return;}
   if(e.ctrlKey&&k==='c'){e.preventDefault();copyImage();return;}
+  if(e.ctrlKey&&k==='p'){e.preventDefault();doPrint();return;}
   if(e.key==='ArrowLeft'||k==='a'){e.preventDefault();showAt(curIdx-1);}
   else if(e.key==='ArrowRight'||k==='d'){e.preventDefault();showAt(curIdx+1);}
   else if(e.key==='ArrowUp'){e.preventDefault();showAt(curIdx-1);}
